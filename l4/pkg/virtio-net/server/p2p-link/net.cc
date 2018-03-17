@@ -1,6 +1,7 @@
 /*
- * Copyright (C) 2012-2016 Kernkonzept GmbH.
+ * Copyright (C) 2012-2018 Kernkonzept GmbH.
  * Author(s): Alexander Warg <alexander.warg@kernkonzept.com>
+ *            Andreas Wiese <andreas.wiese@kernkonzept.com>
  *
  * This file is distributed under the terms of the GNU General Public
  * License, version 2.  Please see the COPYING-GPL-2 file for details.
@@ -28,12 +29,16 @@
 #include <l4/l4virtio/server/l4virtio>
 #include <l4/l4virtio/l4virtio>
 
+#include <l4/util/assert.h>
+
 #include <cstring>
+#include <climits>
 #include <getopt.h>
 
 #include <cstdio>
 #include <pthread.h>
 #include <debug.h>
+#include <checksum.h>
 
 using cxx::access_once;
 using L4virtio::Svr::Data_buffer;
@@ -66,7 +71,7 @@ struct Virtqueue : L4virtio::Svr::Virtqueue
 enum
 {
   Merge_rx_buffers = true,
-  Csum_offload     = false,
+  Csum_offload     = true,
   Full_segmentation_offload = false,
 };
 
@@ -154,7 +159,7 @@ public:
   explicit Virtio_net(unsigned vq_max)
   : L4virtio::Svr::Device(&_dev_config),
     _dev_config(0x44, L4VIRTIO_ID_NET, 2),
-    _vq_max(vq_max)
+    _vq_max(vq_max), _enabled_features(0)
 #ifdef CONFIG_STATS
     , num_tx(0), num_rx(0), num_dropped(0), num_irqs(0)
 #endif
@@ -189,7 +194,9 @@ public:
 
   void register_single_driver_irq()
   {
-    kick_guest_irq = L4Re::chkcap(server_iface()->rcv_cap<L4::Irq>(0));
+    kick_guest_irq = L4Re::Util::Unique_cap<L4::Irq>(
+       L4Re::chkcap(server_iface()->template rcv_cap<L4::Irq>(0)));
+
     L4Re::chksys(server_iface()->realloc_rcv_cap(0));
   }
 
@@ -207,6 +214,14 @@ public:
 
   bool available()
   { return !obj_cap(); }
+
+  /**
+   * Return the set of features negotiated between host and guest.
+   *
+   * \retval  The set of negotiated and hence enabled features.
+   */
+  const Features &enabled_features()
+  { return _enabled_features; }
 
   template<typename T, unsigned N >
   static unsigned array_length(T (&)[N]) { return N; }
@@ -231,6 +246,18 @@ public:
           printf("failed to start queues\n");
           return false;
         }
+
+    l4_uint32_t guest_features = _dev_config.guest_features(0);
+    l4_uint32_t features = guest_features & _dev_config.host_features(0);
+
+    if (L4_UNLIKELY(guest_features != features))
+      {
+        Err().printf("error: guest enabled features we did not offer: %x\n",
+                     ~features & guest_features);
+        return false;
+      }
+
+    _enabled_features.raw = features;
 
     return true;
   }
@@ -282,8 +309,9 @@ private:
 
   unsigned _vq_max;
   Virtqueue _q[2];
-  L4Re::Util::Auto_cap<L4::Irq>::Cap kick_guest_irq;
+  L4Re::Util::Unique_cap<L4::Irq> kick_guest_irq;
   L4::Cap<L4::Irq> _host_irq;
+  Features _enabled_features;
 };
 
 static L4Re::Util::Registry_server<L4Re::Util::Br_manager_hooks> server;
@@ -351,19 +379,20 @@ public:
     Buffer pkt;
     Virtio_net::Hdr *hdr;
 
-    Virtio_net *d;
+    /// Pointer to the device the end point belongs to
+    Virtio_net *dev;
     Virtqueue *q;
 
     enum { merge_rx = Merge_rx_buffers };
     enum { hdr_size = Merge_rx_buffers ? 12 : 10 };
 
-    End_point(Virtio_net *dev, Virtqueue *queue) : d(dev), q(queue) {}
+    End_point(Virtio_net *device, Virtqueue *queue) : dev(device), q(queue) {}
 
     void finish(l4_uint32_t total = 0)
-    { q->finish(head, d, total); }
+    { q->finish(head, dev, total); }
 
     bool next()
-    { return Request_processor::next(d->mem_info(), &pkt); }
+    { return Request_processor::next(dev->mem_info(), &pkt); }
 
     bool start_packet(bool read, l4_uint32_t *total = 0, bool merge = false)
     {
@@ -372,7 +401,7 @@ public:
       if (L4_UNLIKELY(!r))
         return false;
 
-      head = start(d->mem_info(), r, &pkt);
+      head = start(dev->mem_info(), r, &pkt);
       if (0)
         printf("XX(%s): start new packet: %p (%u)\n",
                read ? "tx" : "rx", pkt.pos, pkt.left);
@@ -409,6 +438,169 @@ public:
 
   };
 
+  /**
+   * An object that does check summing on packets sent between two endpoints.
+   *
+   * This is the object that encapsulates the calculation of checksums, should
+   * this be required. This is the case if the two peers on the link negotiated
+   * different checksum offloading capabilities, i.e. one announced support, the
+   * other one didn't. In this case the capable peer may send partially
+   * checksummed packets which the uncapable peer would drop if simply passed
+   * through.
+   *
+   * This object tracks the state of the checksum calculation, like current
+   * offset in the packet in the currently processed descriptor (might be a
+   * descriptor chain) and the position in the receive buffer where to
+   * eventually store the calculated checksum.
+   */
+  class Checksum_computer
+  {
+  private:
+    bool _noop; // packet has checksum or peer supports offloading: do nothing
+    Net_checksum _csum; // actual checksum
+
+    l4_uint32_t _pos; // current position in the tx packet
+    l4_uint32_t _csum_start; // copy of csum_start virtio-net header field
+    l4_uint32_t _csum_offset; // copy of csum_offset virtio-net header field
+
+    l4_uint8_t *_rxptr; // pointer to checksum field in rx buffer
+
+    End_point *_tx, *_rx; // the endpoints we are checksumming for
+
+    /**
+     * Reset the checksum computer for calculating a new package.
+     *
+     * This routine gets called if a descriptor containing a virtio-net header
+     * is seen, hence a new packet is being processed. Its purpose is resetting
+     * the object to cleanly start over.
+     */
+    void reset()
+    {
+      _noop = _rx->dev->enabled_features().guest_csum() ||
+              !_tx->hdr->flags.need_csum();
+      if (_noop == true)
+        return;
+
+      _csum.reset();
+
+      _rxptr = nullptr;
+
+      _pos = 0;
+      // Whether those values are out-of-bounds will be detected by finish(),
+      // as we will never have found the right spot for writing the checksum
+      // while copying/checksumming in this case. Checking them directly here,
+      // is not possible without copying the packet first, as a rogue guest
+      // might meddle with the descriptor chain between getting its length and
+      // actual copying.
+      _csum_start = _tx->hdr->csum_start;
+      _csum_offset = _tx->hdr->csum_offset;
+    }
+
+  public:
+    /**
+     * Initialize a Checksum_computer for two endpoints.
+     *
+     * \param tx  The transmitting endpoint.
+     * \param rx  The receiving endpoint.
+     */
+    Checksum_computer(End_point *tx, End_point *rx)
+    : _noop(true), _pos(0), _csum_start(0), _csum_offset(0),
+      _rxptr(nullptr), _tx(tx), _rx(rx)
+    {}
+
+    /**
+     * Trigger an update of the checksum calculation.
+     *
+     * Upon calling this function, the contents of the endpoints' current
+     * buffers is examined and added to the checksum.
+     */
+    void update()
+    {
+      l4_uint8_t *tx = reinterpret_cast<l4_uint8_t *>(_tx->pkt.pos);
+      l4_uint8_t *rx = reinterpret_cast<l4_uint8_t *>(_rx->pkt.pos);
+      size_t len = cxx::min(_tx->pkt.left, _rx->pkt.left);
+
+      // The tx queue may contain more than one request in which case we have to
+      // detect the beginning of a new descriptor-chain and reset our checksum
+      // calculator accordingly. A new request starts with a virtio-net header,
+      // which will be reflected in the End_point's member variables:
+      if (reinterpret_cast<l4_uint8_t *>(_tx->hdr) == tx) {
+        // skip the virtio-net header
+        tx  += sizeof(Virtio_net::Hdr);
+        rx  += sizeof(Virtio_net::Hdr);
+        len -= sizeof(Virtio_net::Hdr);
+        reset();
+      }
+
+      if (_noop)
+        return;
+
+      if (_pos >= _csum_start)
+        // whole chunk behind _csum_start: checksum all
+        _csum.add(tx, len);
+      else if (_pos <= _csum_start && _pos + len > _csum_start)
+        // part of chunk behind _csum_start: checksum part
+        _csum.add(tx  + _csum_start - _pos, len - _csum_start - _pos);
+
+      // no overflow check on _csum_start + _csum_offset, as these are
+      // l4_uint32_t but get their values from l4_uint16_t header fields.
+      if (_rxptr == nullptr
+          && (_csum_start + _csum_offset)      >= _pos
+          && (_csum_start + _csum_offset + 1U) < (_pos + len))
+        {
+          // save pointer to checksum field in rx buffer
+
+          // In theory, there's uintptr_t and UINTPTR_MAX for this kind of
+          // stuff, but unfortunately this is purely optional and we'll have to
+          // stick with unsigned long
+          if ((unsigned long)rx > 0
+              && (_csum_start + _csum_offset) > (ULONG_MAX - (unsigned long)rx))
+            Err().printf("error: invalid csum_{start,offset}: would overflow");
+          else
+            _rxptr = rx + _csum_start + _csum_offset - _pos;
+        }
+
+      _pos += len;
+    }
+
+    /**
+     * Finalise the checksum and write it to the receive buffer.
+     *
+     * \retval true   NEED_CSUM wasn't set or we successfully wrote the
+     *                checksum.
+     * \retval false  NEED_CSUM was set but we didn't know where to write it.
+     *
+     * This function writes the calculated checksum to the correct location in
+     * the receive buffer. This location is determined by the `update()`
+     * function while processing the packet.
+     *
+     * After this function returns, the receive buffer should contain a fully
+     * checksummed packet and its virtio-net header should be modified to
+     * reflect this fact.
+     */
+    bool finish()
+    {
+      if (_noop)
+        return true;
+
+      if (_rxptr == nullptr)
+        return false;
+
+      l4_uint16_t csum = _csum.finalize();
+      _rxptr[0] = (csum >> 8) & 0xff;
+      _rxptr[1] = csum & 0xff;
+
+      _rx->hdr->flags.need_csum() = 0;
+      _rx->hdr->flags.data_valid() = 0;
+      // spec says if need_csum==0, driver/device MUST NOT use
+      // csum_start/csum_offset, so obviously they may be garbage: keep
+      // untouched.
+      //_rx->hdr->csum_start = 0;
+      //_rx->hdr->csum_offset = 0;
+
+      return true;
+    }
+  };
 
   struct Pipe
   {
@@ -475,11 +667,15 @@ public:
           if (!rx.head && L4_UNLIKELY(!start_rx_packet()))
             return false;
 
+          Checksum_computer csum(&tx, &rx);
+
           for (;;)
             {
               if (0)
                 printf("%p: copy packet %p (%u) -> %p (%u)\n", this,
                        tx.pkt.pos, tx.pkt.left, rx.pkt.pos, rx.pkt.left);
+
+              csum.update();
 
               total += tx.pkt.copy_to(&rx.pkt);
 
@@ -489,14 +685,19 @@ public:
                     printf("%p: finish packet rx buffers: %u last total %u\n",
                            this, nmerge + 1, total);
                   tx.finish();
+
+                  if (!csum.finish())
+                    {
+                      printf("%p: bogus csum_start/csum_offset, drop packet\n",
+                             this);
+                      // XXX: Yeah, but how? finish_x() without consumed_x()?
+                    }
+
                   rx.q->consumed_x(nmerge++, rx.head, total);
                   if (rx.merge_rx)
                     rx.hdr->num_buffers = nmerge;
 
-                  if (tx.hdr->flags.need_csum() == 0)
-                    rx.hdr->flags.data_valid() = 1;
-
-                  rx.q->finish_x(nmerge, rx.d);
+                  rx.q->finish_x(nmerge, rx.dev);
 
                   nmerge = 0;
                   if (L4_UNLIKELY(!start_tx_packet()))
@@ -516,7 +717,7 @@ public:
                     {
                       printf("%p: truncated rx packet, drop\n", this);
                       rx.hdr->flags.raw = 0;
-                      rx.q->finish_x(nmerge, rx.d);
+                      rx.q->finish_x(nmerge, rx.dev);
                     }
 
                   if (0)
@@ -535,25 +736,25 @@ public:
           if (e.proc == &tx)
             {
               // failed TX queue, be nice to RX part.
-              tx.d->device_error();
+              tx.dev->device_error();
 
               if (rx.q->ready() && rx.head)
                 rx.finish(total);
 
               printf("error: TX queue error: bad descriptor: %d in device %p, queue %p\n",
-                     e.error, tx.d, tx.q);
+                     e.error, tx.dev, tx.q);
             }
 
           if (e.proc == &rx)
             {
               // failed RX queue, send half pkt to TX part.
-              rx.d->device_error();
+              rx.dev->device_error();
 
               if (tx.q->ready() && tx.head)
                 tx.finish();
 
               printf("error: RX queue error: bad descriptor: %d in device %p, queue %p\n",
-                     e.error, rx.d, rx.q);
+                     e.error, rx.dev, rx.q);
             }
 
           return false;

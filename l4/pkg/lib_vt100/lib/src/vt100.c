@@ -113,6 +113,7 @@ void parse_character(termstate_t * term, l4_uint8_t c)
             vt100_init(term, term->w, term->phys_h, term->virt_h);
             return;
         }
+	break;
     case ESsquare:
         for(i = 0; i < NUM_PAR; i++)
             term->par[i] = 0;
@@ -121,7 +122,7 @@ void parse_character(termstate_t * term, l4_uint8_t c)
         term->ques = (c=='?');
         if (term->ques)
             return;
-        // fall-through
+        /* FALLTHRU */
     case ESgetpars:
         if (c == ';' && term->used_par < NUM_PAR - 1)
         {
@@ -149,7 +150,9 @@ void parse_character(termstate_t * term, l4_uint8_t c)
                     {
                     case  5: // activate inverse screen
                         if (set_mode(term, 1))
+			{
                             //vt100_redraw(term);
+			}
                         break;
                     case  6: // origin mode = scroll region
                         term->origin_mode = VT100_ORIGIN_SCROLL;
@@ -161,7 +164,8 @@ void parse_character(termstate_t * term, l4_uint8_t c)
                         term->autorepeat = 1;
                         break;
                     case 25: // activate cursor
-                        term->cursor_vis = 1; return;
+                        term->cursor_vis = 1;
+			return;
                     default:
                         break;
                     }
@@ -201,10 +205,13 @@ void parse_character(termstate_t * term, l4_uint8_t c)
                         break;
                     case  5: // deactivate inverse screen
                         if(set_mode(term, 0))
+			{
                             //vt100_redraw(term);
+			}
                         break;
                     case  6: // origin mode = whole screen
                         term->origin_mode = VT100_ORIGIN_GLOBAL;
+			break;
                     case  7: // autowrap mode off
                         term->autowrap = 0;
                         break;
@@ -212,7 +219,8 @@ void parse_character(termstate_t * term, l4_uint8_t c)
                         term->autorepeat = 0;
                         break;
                     case 25: // deactivate cursor
-                        term->cursor_vis = 0; return;
+                        term->cursor_vis = 0;
+			return;
                     default: break;
                     }
                     return;
@@ -312,6 +320,7 @@ void parse_character(termstate_t * term, l4_uint8_t c)
                 //vt100_redraw(term);
                 return;
             }
+	    break;
         case 'K':  // kill to end of line
             switch(term->par[0])
             {
@@ -326,6 +335,7 @@ void parse_character(termstate_t * term, l4_uint8_t c)
                 clean_line(term, term->cur_y);
                 return;
             }
+	    break;
         case 'L':  // insert lines
             if (!term->par[0])
                 term->par[0] = 1;
@@ -377,6 +387,7 @@ void parse_character(termstate_t * term, l4_uint8_t c)
             }
             return;
         }
+	break;
     case EShash:
         term->esc_state = ESnormal;
         switch(c)

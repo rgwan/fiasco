@@ -56,4 +56,9 @@ extern l4_umword_t status_area;
 extern l4re_util_video_goos_fb_t goosfb;
 extern l4re_video_view_info_t fb_info;
 
+EXTERN_C_BEGIN
+struct l4con_vc *alloc_vc(void);
+void register_fb_ds(struct l4con_vc *vc);
+EXTERN_C_END
+
 #endif /* !_VC_H */

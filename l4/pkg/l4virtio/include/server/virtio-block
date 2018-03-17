@@ -389,7 +389,6 @@ public:
     set_device_features(df);
 
     _dev_config.priv_config()->capacity = capacity;
-    _dev_config.reset_hdr(); // to publish hardware features
   }
 
 
@@ -418,6 +417,8 @@ public:
    * The client requests reinitialisation of the connection.
    *
    * \return False if reinitialisation is not supported.
+   * \return True if reinitialisation is supported and the client has been
+   *         reinitialised successfully.
    */
   virtual bool reset_client() { return false; }
 
@@ -485,6 +486,14 @@ public:
     return ret;
   }
 
+  L4::Cap<void> register_obj(L4::Registry_iface *registry,
+                             L4::Cap<L4::Rcv_endpoint> ep)
+  {
+    L4Re::chkcap(registry->register_irq_obj(&_irq_handler));
+
+    return L4Re::chkcap(registry->register_obj(this, ep));
+  }
+
 protected:
   L4::Ipc_svr::Server_iface *server_iface() const
   {
@@ -530,7 +539,6 @@ private:
       {
         // client has changed, purge all old state
         reset();
-        _dev_config.reset_hdr();
         if (!reset_client())
           L4Re::chksys(-L4_EINVAL, "Client already connected.");
       }
@@ -545,6 +553,7 @@ private:
   {
     _queue.disable();
     _dev_config.reset_queue(0, _vq_max);
+    _dev_config.reset_hdr();
     reset_device();
   }
 

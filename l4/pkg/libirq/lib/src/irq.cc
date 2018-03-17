@@ -38,7 +38,7 @@ struct l4irq_t {
   enum l4irq_type        type;
   unsigned               num;
   pthread_t              thread;
-  void                  *(*isr_func)(void *);
+  void                  (*isr_func)(void *);
   void                  *isr_data;
 };
 
@@ -139,7 +139,7 @@ do_l4irq_request(enum l4irq_type type, int irqnum, l4_cap_idx_t given_cap,
                                 (L4::Icu::Mode)mode)))
     return NULL;
 
-  irq->isr_func  = (void *(*)(void *))isr_handler;
+  irq->isr_func  = isr_handler;
   irq->isr_data  = isr_data;
 
   pthread_attr_t a;

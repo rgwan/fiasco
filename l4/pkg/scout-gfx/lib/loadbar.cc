@@ -153,8 +153,8 @@ Kbyte_loadbar::_print_kbytes(int kbytes, char *dst, int dst_len)
 void
 Kbyte_loadbar::_update_label()
 {
-  char value_buf[16];
-  char max_buf[16];
+  char value_buf[12];
+  char max_buf[12];
 
   _print_kbytes(Loadbar::value(), value_buf, sizeof(value_buf));
   _print_kbytes(Loadbar::max_value(), max_buf, sizeof(max_buf));

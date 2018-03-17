@@ -33,7 +33,7 @@ class Ds_handler : public Vmm::Mmio_device
   }
 
   int access(l4_addr_t pfa, l4_addr_t offset, Vmm::Vcpu_ptr vcpu,
-             L4::Cap<L4::Task> vm_task, l4_addr_t min, l4_addr_t max)
+             L4::Cap<L4::Task> vm_task, l4_addr_t min, l4_addr_t max) override
   {
     long res;
 #ifdef MAP_OTHER
@@ -44,12 +44,12 @@ class Ds_handler : public Vmm::Mmio_device
     unsigned char ps = get_page_shift(pfa, min, max, offset, _local_start);
 
     // TODO Need to make sure that memory is locally mapped.
-    res = L4Re::chksys(vm_task->map(L4Re::This_task,
-                                    l4_fpage(l4_trunc_size(_local_start + offset, ps),
-                                             ps,
-                                             vcpu.pf_write()
-                                               ? L4_FPAGE_RWX : L4_FPAGE_RX),
-                                    l4_trunc_size(pfa, ps)));
+    res = l4_error(
+            vm_task->map(L4Re::This_task,
+                         l4_fpage(l4_trunc_size(_local_start + offset, ps),
+                                  ps,
+                                  vcpu.pf_write() ? L4_FPAGE_RWX : L4_FPAGE_RX),
+                         l4_trunc_size(pfa, ps)));
 #endif
 
     if (res < 0)
@@ -62,7 +62,7 @@ class Ds_handler : public Vmm::Mmio_device
     return Vmm::Retry;
   }
 
-  char const *dev_info(char *buf, size_t size) override
+  char const *dev_info(char *buf, size_t size) const override
   {
 #ifndef MAP_OTHER
     snprintf(buf, size, "mmio ds: [%lx - ?] -> [%lx:%lx - ?]",

@@ -345,7 +345,7 @@ static int acpi_enter_sleep(int sleepstate = 3 /* s3 */)
 
   status = AcpiHwEnableAllWakeupGpes();
   if (ACPI_FAILURE(status))
-    d_printf(DBG_WARN, "waring: cannot enable all wakeup GPEs\n");
+    d_printf(DBG_WARN, "warning: cannot enable all wakeup GPEs\n");
 
   d_printf(DBG_DEBUG2, "call platform control object for suspend\n");
   int err = 0;
@@ -410,7 +410,7 @@ static void acpi_get_name(ACPI_HANDLE handle, char name[5])
 
   status = AcpiGetObjectInfo(handle, info.ref());
   if (ACPI_FAILURE(status))
-    strncpy(name, "NONE", 4);
+    strncpy(name, "NONE", 5);
   else
     {
       l4_uint32_t nv = info->Name;
@@ -419,8 +419,8 @@ static void acpi_get_name(ACPI_HANDLE handle, char name[5])
           name[i] = nv & 0xff;
           nv >>= 8;
         }
+      name[4] = 0;
     }
-  name[4] = 0;
 }
 
 /**
