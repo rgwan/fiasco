@@ -18,6 +18,8 @@
 #include <dirent.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace {
 

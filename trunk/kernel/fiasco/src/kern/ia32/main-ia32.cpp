@@ -131,17 +131,19 @@ int FIASCO_FASTCALL boot_ap_cpu()
 
   Cpu &cpu = Cpu::cpus.cpu(_cpu);
 
-  Idt::load();
 
   if (cpu_is_new)
     {
       Kmem::init_cpu(cpu);
+      Idt::init_current_cpu();
       Apic::init_ap();
       Apic::apic.cpu(_cpu).construct(_cpu);
       Ipi::init(_cpu);
     }
   else
     {
+      Kmem::resume_cpu(_cpu);
+      Idt::load();
       cpu.pm_resume();
       Pm_object::run_on_resume_hooks(_cpu);
     }

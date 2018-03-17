@@ -11,6 +11,7 @@
 #include <l4/sys/err.h>
 #include <l4/sys/factory.h>
 #include <l4/sys/task.h>
+#include <l4/sys/rcv_endpoint.h>
 #include <l4/re/env.h>
 #include <l4/re/c/util/cap_alloc.h>
 #include <l4/re/c/rm.h>

@@ -29,7 +29,7 @@
 
 $(GENERAL_D_LOC): $(L4DIR)/mk/binary.inc $(L4DIR)/mk/modes.inc $(L4DIR)/mk/rules.inc
 
-SRC_CC_IS_CXX11 ?= c++0x
+SRC_CC_IS_CXX11 ?= y
 
 # our default Makefile-name in the OBJ-Subdirs
 BID_OBJ_Makefile ?= Makefile
@@ -57,11 +57,6 @@ ifneq ($(strip $(SRC_F)$(foreach t,$(TARGET),$(SRC_F_$(t)))),)
     ifeq ($(GCCFORTRANAVAIL),)
       $(info $(shell echo -e "\033[32mFortran compiler (gcc-4.6 or later) missing, skipping directory '$(SRC_DIR)'.\033[0m"))
       SYSTEMS =
-    else
-      ifeq ($(filter 4.6 4.7 4.8 4.9 5 6 7,$(GCCVERSION)),)
-        $(info $(shell echo -e "\033[32mFortran compiler gcc version 4.6 or later required, skipping directory '$(SRC_DIR)'.\033[0m"))
-        SYSTEMS =
-      endif
     endif
   endif
 endif
@@ -496,7 +491,7 @@ CXXFLAGS_L4_GENERIC += $(GCCSTACKPROTECTOROPT)
 CXXFLAGS_L4_GENERIC += -fuse-cxa-atexit
 endif
 
-CXXFLAGS_CXX11 = $(if $(filter 4.7 4.8 4.9 5 6 7,$(GCCVERSION)),-std=gnu++11,-std=gnu++0x)
+CXXFLAGS_CXX11 = -std=gnu++11
 
 ifneq ($(SRC_CC_IS_CXX11),)
   CXXFLAGS+= $(CXXFLAGS_CXX11)

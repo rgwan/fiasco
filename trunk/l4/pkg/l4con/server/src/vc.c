@@ -49,9 +49,7 @@
 
 #define Panic(a...) do { fprintf(stderr, a); exit(1); } while (0)
 
-struct l4con_vc *alloc_vc(void);
 void fill_out_info(struct l4con_vc *vc);
-void register_fb_ds(struct l4con_vc *vc);
 
 
 l4_umword_t status_area = 0;

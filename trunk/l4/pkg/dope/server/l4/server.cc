@@ -174,8 +174,7 @@ Dope_base::create_event()
 {
   long r;
 
-  L4Re::Util::Auto_cap<L4Re::Dataspace>::Cap b
-    = L4Re::Util::cap_alloc.alloc<L4Re::Dataspace>();
+  auto b = L4Re::Util::make_unique_cap<L4Re::Dataspace>();
   if (!b.is_valid())
     return -L4_ENOMEM;
 

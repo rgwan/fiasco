@@ -96,16 +96,16 @@ Basic_window::handle_event(Event const &ev)
       if (ev.key_cnt != 1 || !e)
         break;
 
-        {
-          _active_pos = e->map_to_parent(Point(0,0));
-          _active = e;
+      {
+        _active_pos = e->map_to_parent(Point(0,0));
+        _active = e;
 
-          if (handle_key_focus(ev))
-            break;
-          Event re = ev;
-          re.m -= _active_pos;
-          _active->handle_event(re);
-        }
+        if (handle_key_focus(ev))
+          break;
+        Event re = ev;
+        re.m -= _active_pos;
+        _active->handle_event(re);
+      }
 
       _assign_mfocus(e, 1);
 

@@ -11,7 +11,7 @@ ifneq ($(SYSTEM),)
     $(info [32m $(CC) does not have omp.h header file available, skipping. [0m)
     PC_FILENAME =
   else
-   TARGET           = libgomp.a
+   TARGET           = libgomp.a libgomp.so
  endif
 endif
 

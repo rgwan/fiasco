@@ -9,6 +9,7 @@
 #include <l4/re/env>
 #include <l4/re/error_helper>
 #include <l4/re/util/cap_alloc>
+#include <l4/re/util/unique_cap>
 #include <l4/re/video/goos>
 #include <unistd.h>
 #include <l4/scout-gfx/redraw_manager>
@@ -27,7 +28,7 @@
 #include "factory.h"
 
 namespace {
-using L4Re::Util::Auto_cap;
+using L4Re::Util::Unique_cap;
 
 class Semaphore
 {
@@ -137,9 +138,9 @@ class Timer_thread
 private:
 
   pthread_t _th;
-  Auto_cap<L4Re::Dataspace>::Cap _ev_ds;
-  Auto_cap<L4::Irq>::Cap _ev_irq;
-  L4Re::Rm::Auto_region<void *> _ev_ds_addr;
+  Unique_cap<L4Re::Dataspace> _ev_ds;
+  Unique_cap<L4::Irq> _ev_irq;
+  L4Re::Rm::Unique_region<void *> _ev_ds_addr;
   L4Re::Event_buffer _evb;
 
   Point _m;
@@ -251,11 +252,11 @@ public:
   void start(L4::Cap<L4Re::Event> const &e)
   {
 
-    using L4Re::Util::cap_alloc;
+    using L4Re::Util::make_unique_cap;
     using L4Re::chksys;
 
-    _ev_ds = cap_alloc.alloc<L4Re::Dataspace>();
-    _ev_irq = cap_alloc.alloc<L4::Irq>();
+    _ev_ds = make_unique_cap<L4Re::Dataspace>();
+    _ev_irq = make_unique_cap<L4::Irq>();
     chksys(L4Re::Env::env()->factory()->create(_ev_irq.get()));
     chksys(e->get_buffer(_ev_ds.get()));
     chksys(L4Re::Env::env()->rm()->attach(&_ev_ds_addr, _ev_ds->size(),
@@ -378,8 +379,8 @@ private:
 
   L4Re::Video::Goos::Info _scr_info;
   L4::Cap<L4Re::Console> _screen;
-  Auto_cap<L4Re::Dataspace>::Cap _fb_ds;
-  L4Re::Rm::Auto_region<char *> _fb_addr;
+  Unique_cap<L4Re::Dataspace> _fb_ds;
+  L4Re::Rm::Unique_region<char *> _fb_addr;
   Area _size;
 
   bool _ready;
@@ -487,7 +488,6 @@ public:
 bool
 Re_pf::probe()
 {
-  using L4Re::Util::cap_alloc;
   L4Re::Env const *e = L4Re::Env::env();
   L4::Cap<void> _mag = e->get_cap<void>("fb");
   return _mag.is_valid();
@@ -498,7 +498,7 @@ Re_pf::Re_pf(Rect const &sz)
   _canvas(0), _dbl_buffer_2(false)
 {
   using L4Re::chksys;
-  using L4Re::Util::cap_alloc;
+  using L4Re::Util::make_unique_cap;
   (void)sz;
 
   L4Re::Video::View::Info _view_info;
@@ -521,7 +521,7 @@ Re_pf::Re_pf(Rect const &sz)
          _scr_info.pixel_info.bytes_per_pixel());
 #endif
 
-  _fb_ds = cap_alloc.alloc<L4Re::Dataspace>();
+  _fb_ds = make_unique_cap<L4Re::Dataspace>();
 
   if (!_view_info.has_static_buffer())
     {
