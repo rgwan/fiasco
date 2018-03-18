@@ -120,12 +120,6 @@ my %modules =
      modules => [ qw(l4re examples_all doc toolbin) ],
    },
 
-   mips_tee => {
-     paths => [ map { "l4/pkg/$_" }
-                qw(cons l4virtio libfdt uvmm virtio-net virtio-trusty-proxy) ],
-     modules => [ qw(l4re doc toolbin) ],
-   },
-
    l4re_snapshot =>  {
      paths => [ map { "l4/pkg/$_" }
                 qw(ankh
@@ -219,6 +213,12 @@ my %modules =
 
    remote_repo_l4re => {
       modules => [ qw(l4re_snapshot) ],
+   },
+
+   mips_tee => {
+     paths => [ map { "l4/pkg/$_" }
+                qw(cons l4virtio libfdt uvmm virtio-net virtio-trusty-proxy) ],
+     modules => [ qw(fiasco l4re doc toolbin) ],
    },
 
    remote_repo => { modules => [ qw(fiasco remote_repo_l4re) ] },
