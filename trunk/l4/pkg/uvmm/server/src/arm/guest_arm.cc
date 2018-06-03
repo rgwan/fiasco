@@ -29,8 +29,7 @@ typedef void (*Entry)(Vmm::Vcpu_ptr vcpu);
 namespace Vmm {
 
 Guest::Guest()
-: _gic(Vdev::make_device<Gic::Dist>(16, 2)), // 16 * 32 spis, 2 cpus
-  _timer(Vdev::make_device<Vdev::Core_timer>())
+: _gic(Vdev::make_device<Gic::Dist>(16, 2)) // 16 * 32 spis, 2 cpus
 {}
 
 Guest *
@@ -46,7 +45,7 @@ using namespace Vdev;
 
 struct F : Factory
 {
-  cxx::Ref_ptr<Vdev::Device> create(Device_lookup const *devs,
+  cxx::Ref_ptr<Vdev::Device> create(Device_lookup *devs,
                                     Vdev::Dt_node const &node) override
   {
     auto *vbus = devs->vbus().get();
@@ -86,10 +85,18 @@ static Vdev::Device_type t4 = { "arm,gic-400", nullptr, &f };
 
 struct F_timer : Factory
 {
-  cxx::Ref_ptr<Vdev::Device> create(Device_lookup const *devs,
-                                    Vdev::Dt_node const &) override
+  cxx::Ref_ptr<Vdev::Device> create(Device_lookup *devs,
+                                    Vdev::Dt_node const &node) override
   {
-    return devs->vmm()->timer();
+    cxx::Ref_ptr<Gic::Ic> ic = devs->get_or_create_ic_dev(node, false);
+    if (!ic)
+      return nullptr;
+
+    unsigned irq = ic->dt_get_interrupt(node, 2);
+    auto timer = Vdev::make_device<Vdev::Core_timer>(ic.get(), irq, node);
+
+    devs->vmm()->set_timer(timer);
+    return timer;
   }
 };
 
@@ -298,7 +305,13 @@ Guest::prepare_linux_run(Vcpu_ptr vcpu, l4_addr_t entry,
 void
 Guest::run(cxx::Ref_ptr<Cpu_dev_array> cpus)
 {
-  _cpus = cpus;
+  // If the device tree does not contain a valid timer node the timer might be
+  // invalid. Since the code relies on a valid timer we have to check before
+  // starting the guest.
+  if (!_timer)
+    L4Re::chksys(-ENODEV, "No timer available, aborting");
+
+ _cpus = cpus;
   for (auto cpu: *cpus.get())
     {
       if (!cpu)
@@ -308,11 +321,10 @@ Guest::run(cxx::Ref_ptr<Cpu_dev_array> cpus)
 
       vcpu->user_task = _task.cap();
       cpu->powerup_cpu();
-      info().printf("Powered up cpu%d %p, gic: ?\n", vcpu.get_vcpu_id(),
+      info().printf("Powered up cpu%d [%p]\n", vcpu.get_vcpu_id(),
                     cpu.get());
 
-      auto *vm = vcpu.state();
-      _gic->set_cpu(vcpu.get_vcpu_id(), &vm->gic, cpu->thread_cap());
+      _gic->set_cpu(vcpu.get_vcpu_id(), *vcpu, cpu->thread_cap());
     }
 
   cpus->cpu(0)->startup();
@@ -405,8 +417,24 @@ Guest::handle_psci_call(Vcpu_ptr vcpu)
       break;
 
     case CPU_SUSPEND:
-      vcpu->r.r[0] = NOT_SUPPORTED;
-      Err().printf("... PSCI CPU SUSPEND\n");
+      {
+        l4_addr_t power_state  = vcpu->r.r[1];
+        l4_addr_t entry_gpa    = vcpu->r.r[2];
+        l4_umword_t context_id = vcpu->r.r[3];
+
+        wait_for_timer_or_irq(vcpu);
+
+        if (power_state & (1 << 30))
+          {
+            memset(&vcpu->r, 0, sizeof(vcpu->r));
+            prepare_vcpu_startup(vcpu, entry_gpa);
+            vcpu->r.r[0]  = context_id;
+            l4_vcpu_e_write_32(*vcpu, L4_VCPU_E_SCTLR,
+                               l4_vcpu_e_read_32(*vcpu, L4_VCPU_E_SCTLR) & ~1U);
+          }
+        else
+          vcpu->r.r[0] = SUCCESS;
+      }
       break;
 
     case CPU_OFF:
@@ -468,12 +496,6 @@ Guest::handle_psci_call(Vcpu_ptr vcpu)
           l4_addr_t entry_gpa = vcpu->r.r[1];
           l4_umword_t context_id = vcpu->r.r[2];
 
-          if (entry_gpa & 1)
-            {
-              vcpu->r.r[0] = INVALID_ADDRESS;
-              return true;
-            }
-
           // TODO: Check that all other cores are off
           // if not:
           if (0)
@@ -489,10 +511,10 @@ Guest::handle_psci_call(Vcpu_ptr vcpu)
           _pm.resume();
 
           memset(&vcpu->r, 0, sizeof(vcpu->r));
-          vcpu->r.ip    = entry_gpa;
+          prepare_vcpu_startup(vcpu, entry_gpa);
           vcpu->r.r[0]  = context_id;
-          vcpu->r.flags = 0x1d3;
-          vcpu.state()->vm_regs.sctlr &= ~1UL;
+          l4_vcpu_e_write_32(*vcpu, L4_VCPU_E_SCTLR,
+                             l4_vcpu_e_read_32(*vcpu, L4_VCPU_E_SCTLR) & ~1U);
         }
       break;
 
@@ -546,20 +568,15 @@ guest_memory_fault(Vcpu_ptr vcpu)
 }
 
 void
-Vmm::Guest::handle_wfx(Vcpu_ptr vcpu)
+Vmm::Guest::wait_for_timer_or_irq(Vcpu_ptr vcpu)
 {
-  vcpu->r.ip += 2 << vcpu.hsr().il();
-  if (vcpu.hsr().wfe_trapped()) // WFE
-    return;
-
   if (_gic->schedule_irqs(vmm_current_cpu_id))
     return;
 
   l4_timeout_t to = L4_IPC_NEVER;
-  auto *vm = vcpu.state();
 
   auto *utcb = l4_utcb();
-  if ((vm->cntv_ctl & 3) == 1) // timer enabled and not masked
+  if ((l4_vcpu_e_read_32(*vcpu, L4_VCPU_E_CNTVCTL) & 3) == 1) // timer enabled and not masked
     {
       // calculate the timeout based on the VTIMER values !
       auto cnt = vcpu.cntvct();
@@ -575,6 +592,16 @@ Vmm::Guest::handle_wfx(Vcpu_ptr vcpu)
     }
 
   wait_for_ipc(utcb, to);
+}
+
+void
+Vmm::Guest::handle_wfx(Vcpu_ptr vcpu)
+{
+  vcpu->r.ip += 2 << vcpu.hsr().il();
+  if (vcpu.hsr().wfe_trapped()) // WFE
+    return;
+
+  wait_for_timer_or_irq(vcpu);
 }
 
 static void

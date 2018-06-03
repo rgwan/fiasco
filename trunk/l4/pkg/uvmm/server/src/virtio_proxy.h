@@ -76,7 +76,7 @@ public:
 
     auto *e = L4Re::Env::env();
     L4Re::chksys(e->rm()->attach(&_config, _config_page_size,
-                                 L4Re::Rm::Search_addr,
+                                 L4Re::Rm::Search_addr | L4Re::Rm::Eager_map,
                                  L4::Ipc::make_cap_rw(_config_cap.get())),
                  "Attaching config dataspace");
 
@@ -201,8 +201,8 @@ public:
   : _dev(config_size)
   {}
 
-  void init_device(Vdev::Device_lookup const *devs,
-                   Vdev::Dt_node const &self) override
+  void init_device(Vdev::Device_lookup *devs,
+                   Vdev::Dt_node const &self)
   {
     int err = dev()->event_connector()->init_irqs(devs, self);
     if (err < 0)

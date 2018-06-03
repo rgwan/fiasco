@@ -11,7 +11,7 @@ class Ram_quota;
 class Thread;
 
 
-/** Hardware interrupts.  This class encapsulates handware IRQs.  Also,
+/** Hardware interrupts.  This class encapsulates hardware IRQs.  Also,
     it provides a registry that ensures that only one receiver can sign up
     to receive interrupt IPC messages.
  */
@@ -234,7 +234,7 @@ Irq_muxer::handle(Upstream_irq const *ui)
 {
   assert (cpu_lock.test());
   Irq_base::mask_and_ack();
-  ui->ack();
+  Upstream_irq::ack(ui);
 
   if (EXPECT_FALSE (!Irq_base::_next))
     return;
@@ -635,7 +635,7 @@ Irq_sender::_hit_level_irq(Upstream_irq const *ui)
 
   assert (cpu_lock.test());
   mask_and_ack();
-  ui->ack();
+  Upstream_irq::ack(ui);
   if (queue() == 0)
     send();
 }
@@ -669,7 +669,7 @@ Irq_sender::_hit_edge_irq(Upstream_irq const *ui)
   else
     mask_and_ack();
 
-  ui->ack();
+  Upstream_irq::ack(ui);
   if (q == 0)
     send();
 }

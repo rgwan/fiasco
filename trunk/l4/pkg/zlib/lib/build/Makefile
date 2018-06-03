@@ -3,6 +3,8 @@ L4DIR		?= $(PKGDIR)/../..
 
 TARGET		= libl4z.a libl4z.so
 LIBS            = $(GCCLIB)
+WARNINGS        = $(WARNINGS_MEDIUM) \
+                  $(call checkcc,-Wno-implicit-function-declaration)
 SYSTEMS	        = $(SYSTEMS_ABI) $(SYSTEMS_PLAIN)
 CONTRIB_INCDIR	= zlib
 PC_FILENAME     = $(if $(filter %-l4f,$(SYSTEM)),zlib)
