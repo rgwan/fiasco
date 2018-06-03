@@ -17,6 +17,10 @@ namespace Vdev {
 
 struct Core_timer : public Device, public Vmm::Irq_edge_sink
 {
+  Core_timer(Gic::Ic *ic, int irq, Dt_node const &self) : Irq_edge_sink(ic, irq)
+  {
+    init_tick_conversion(self);
+  }
   /*
    * We use "scaling math" as described in a comment in
    * linux/arch/x86/kernel/tsc.c. We use micro seconds instead of nano
@@ -159,22 +163,6 @@ struct Core_timer : public Device, public Vmm::Irq_edge_sink
       .printf("Guest timer frequency is %d\n"
               "using (%d/%d), (%d/%d) to calculate timeouts\n",
               cntfrq, _scale, _scaled_ticks_per_us, _cyc2ms_scale, _shift);
-  }
-
-  void init_device(Device_lookup const *devs, Dt_node const &self) override
-  {
-    auto irq_ctl = self.find_irq_parent();
-    if (!irq_ctl.is_valid())
-      L4Re::chksys(-L4_ENODEV, "No interupt handler found for timer.\n");
-
-    // XXX need dynamic cast for Ref_ptr here
-    auto *ic = dynamic_cast<Gic::Ic *>(devs->device_from_node(irq_ctl).get());
-
-    if (!ic)
-      L4Re::chksys(-L4_ENODEV, "Interupt handler for timer has bad type.\n");
-
-    init_tick_conversion(self);
-    rebind(ic, ic->dt_get_interrupt(self, 2));
   }
 
 private:

@@ -99,7 +99,9 @@ public:
     else if (ready == 1 && !q->ready())
       {
         qc->ready = 0;
-        if (qc->num > qc->num_max)
+        l4_uint16_t num = qc->num;
+        // num must be: a power of two in range [1,num_max].
+        if (!num || (num & (num - 1)) || num > qc->num_max)
           return;
 
         q->init_queue(dev()->template devaddr_to_virt<void>(qc->desc_addr),
@@ -109,8 +111,8 @@ public:
       }
   }
 
-  void init_device(Vdev::Device_lookup const *devs,
-                   Vdev::Dt_node const &self) override
+  void init_device(Vdev::Device_lookup *devs,
+                   Vdev::Dt_node const &self)
   {
     int err = dev()->event_connector()->init_irqs(devs, self);
     if (err < 0)

@@ -61,16 +61,6 @@ ifneq ($(strip $(SRC_F)$(foreach t,$(TARGET),$(SRC_F_$(t)))),)
   endif
 endif
 
-ifneq ($(SRC_CC_IS_CXX11),)
-  ifneq ($(SRC_CC_IS_CXX11),c++0x)
-    # gcc-4.5 and 4.6 only know about c++0x
-    ifeq ($(filter 4.7 4.8 4.9 5 6 7,$(GCCVERSION)),)
-      $(info $(shell echo -e "\033[32mGCC too old to compile C++11 sources in directory '$(SRC_DIR)'. At least version 4.7 required.\033[0m"))
-      SYSTEMS =
-    endif
-  endif
-endif
-
 ifneq ($(BID_MISSING_PCS),)
   # clear SYSTEMS to prevent building anything
   SYSTEMS =
@@ -715,7 +705,7 @@ ifneq ($(MODE),shared)
   else
     define make_per_target_reloc
       $(1): $$(BID_RAM_BASE_DEP)
-      LDFLAGS_$(1) += --defsym=__executable_start=$$(firstword $$(call default_reloc,$(1)))
+      LDFLAGS_$(1) += -Ttext-segment=$$(firstword $$(call default_reloc,$(1)))
     endef
   endif
 else

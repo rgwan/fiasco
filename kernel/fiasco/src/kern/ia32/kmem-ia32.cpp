@@ -98,6 +98,8 @@ IMPLEMENTATION [ia32, amd64]:
 
 #include <cstdio>
 
+enum { Print_info = 0 };
+
 PUBLIC
 void
 Device_map::init()
@@ -703,7 +705,7 @@ Kmem::setup_cpu_structures_isolation(Cpu &cpu, Kpdir *cpu_dir, cxx::Simple_alloc
   Address ki_page = ((Address)_kernel_text_start) & ~(Config::PAGE_SIZE - 1);
   Address kie_page = (((Address)_kernel_text_entry_end) + (Config::PAGE_SIZE - 1)) & ~(Config::PAGE_SIZE - 1);
 
-  if (1)
+  if (Print_info)
     printf("kernel code: %p(%lx)-%p(%lx)\n", _kernel_text_start,
            ki_page, _kernel_text_entry_end, kie_page);
 
@@ -813,8 +815,14 @@ Kmem::init_cpu(Cpu &cpu)
               if (dst.level != 2)
                 panic("could not setup per-cpu page table: %d\n", __LINE__);
 
+              if (dst.is_valid())
+                {
+                  assert (*dst.pte == *src.pte);
+                  ++i;
+                  continue;
+                }
 
-              if (0)
+              if (Print_info)
                 printf("physmem sync(2M): va:%16lx pte:%16lx\n", a, *src.pte);
 
               write_now(dst.pte, *src.pte);
@@ -836,8 +844,14 @@ Kmem::init_cpu(Cpu &cpu)
               if (dst.level != 1)
                 panic("could not setup per-cpu page table: %d\n", __LINE__);
 
+              if (dst.is_valid())
+                {
+                  assert (*dst.pte == *src.pte);
+                  i += 512; // skip 512 2MB entries == 1G
+                  continue;
+                }
 
-              if (0)
+              if (Print_info)
                 printf("physmem sync(1G): va:%16lx pte:%16lx\n", a, *src.pte);
 
               write_now(dst.pte, *src.pte);

@@ -57,6 +57,12 @@ public:
   Node() : _node(-1) {}
   Node(void *dt, int node) : _tree(dt), _node(node) {}
 
+  bool operator == (Node const &other) const
+  { return (_tree == other._tree) && (_node == other._node); }
+
+  bool operator != (Node const &other) const
+  { return !operator==(other); }
+
   bool is_valid() const
   { return _node >= 0; }
 
@@ -482,18 +488,6 @@ public:
   bool has_mmio_regs() const;
 
   /**
-   * Check whether a node has irq or mmio resources associated
-   *
-   * This function checks whether the node has "reg" or "interrupts"
-   * properties and any of the reg property values are mapped to mmio
-   * resources on the root bus.
-   *
-   * \return True if there are irq or mmio resources
-   */
-  bool needs_vbus_resources() const
-  { return has_irqs() || has_mmio_regs(); }
-
-  /**
    * Translate a reg entry
    *
    * Reg entries are bus local information. To get an address valid on
@@ -547,6 +541,16 @@ public:
     return reinterpret_cast<T const *>(prop);
   }
 
+  /**
+   * Find IRQ parent of node.
+   *
+   * \retval  valid node - Node of IRQ parent
+   * \retval  invalid node - node does not have an IRQ parent
+   *
+   * Traverses the device tree upwards and tries to find the  IRQ parent. If no
+   * IRQ parent is found or the IRQ parent is identical to the node itself an
+   * invalid node is returned.
+   */
   Node find_irq_parent() const
   {
     int node = _node;
@@ -563,7 +567,12 @@ public:
           node = fdt_parent_offset(_tree, node);
 
         if (node >= 0 && fdt_getprop(_tree, node, "#interrupt-cells", nullptr))
-          return Node(_tree, node);
+          {
+            if (node != _node)
+              return Node(_tree, node);
+            else
+              break;
+          }
       }
 
     return Node(_tree, -1);
@@ -616,6 +625,23 @@ public:
 
   void add_to_size(l4_size_t padding) const
   { fdt_set_totalsize(_tree, fdt_totalsize(_tree) + padding); }
+
+  /**
+   * Apply the device tree overlay at 'fdt_overlay'.
+   *
+   * \param  fdt_overlay address of the device tree overlay which
+   *                     should be applied to this device tree.
+   * \param  name        name of the overlay for logging purposes.
+   *
+   * \note The overlay device tree is changed as well. Its magic value
+   *       is invalidated on success.
+   */
+  void apply_overlay(void *fdt_overlay, char const *name)
+  {
+    int ret = fdt_overlay_apply(_tree, fdt_overlay);
+    if (ret < 0)
+      ERR("cannot apply overlay '%s': %d\n", name, ret);
+  }
 
   Node first_node() const
   { return Node(_tree, 0); }

@@ -169,8 +169,9 @@ class Uart_8250_mmio
   };
 
 public:
-  Uart_8250_mmio(L4::Cap<L4::Vcon> con, l4_uint64_t regshift)
-  : _con(con), _regshift(regshift)
+  Uart_8250_mmio(L4::Cap<L4::Vcon> con, l4_uint64_t regshift, Gic::Ic *ic,
+                 int irq)
+  : _con(con), _regshift(regshift), _sink(ic, irq)
   {
     l4_vcon_attr_t attr;
     if (l4_error(con->get_attr(&attr)) != L4_EOK)
@@ -201,30 +202,6 @@ public:
     _con->bind(0, L4Re::chkcap(ret, "Registering 8250 device"));
 
     return ret;
-  }
-
-  void init_device(Vdev::Device_lookup const *devs, Vdev::Dt_node const &node)
-  {
-    auto irq_ctl = node.find_irq_parent();
-    if (!irq_ctl.is_valid()) {
-      warn.printf("Invalid interrupt parent for 8250 uart.\n");
-      return;
-    }
-
-    auto *ic = dynamic_cast<Gic::Ic *>(devs->device_from_node(irq_ctl).get());
-
-    if (!ic)
-        L4Re::chksys(-L4_ENODEV,
-                     "Interrupt handler for 8250 uart has bad type.\n");
-
-    if (ic->dt_get_num_interrupts(node) != 1)
-      {
-        Dbg(Dbg::Dev, Dbg::Info, "pl011")
-          .printf("Device tree must specify one interrupt for pl011 console.\n");
-        return;
-      }
-
-    _sink.rebind(ic, ic->dt_get_interrupt(node, 0));
   }
 
   l4_uint32_t read(unsigned reg, char size, unsigned cpu_id)
@@ -378,7 +355,7 @@ private:
 
 struct F : Vdev::Factory
 {
-  cxx::Ref_ptr<Vdev::Device> create(Vdev::Device_lookup const *devs,
+  cxx::Ref_ptr<Vdev::Device> create(Vdev::Device_lookup *devs,
                                     Vdev::Dt_node const &node) override
   {
     Dbg(Dbg::Dev, Dbg::Info).printf("Create virtual 8250 console\n");
@@ -404,7 +381,13 @@ struct F : Vdev::Factory
           }
       }
 
-    auto c = Vdev::make_device<Uart_8250_mmio>(cap, regshift);
+    cxx::Ref_ptr<Gic::Ic> ic = devs->get_or_create_ic_dev(node, false);
+    if (!ic)
+      return nullptr;
+
+    auto c = Vdev::make_device<Uart_8250_mmio>(cap, regshift,
+                                               ic.get(),
+                                               ic->dt_get_interrupt(node, 0));
     c->register_obj(devs->vmm()->registry());
     devs->vmm()->register_mmio_device(c, node);
     return c;
@@ -415,5 +398,3 @@ struct F : Vdev::Factory
 
 static F f;
 static Vdev::Device_type t = { "uart,8250", nullptr, &f };
-
-

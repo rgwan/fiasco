@@ -32,18 +32,17 @@ Guest::create_instance()
   return guest;
 }
 
-void Guest::register_io_device(cxx::Ref_ptr<Io_device> const &dev,
-                               l4_addr_t start, l4_size_t sz)
+void Guest::register_io_device(Region const &region,
+                               cxx::Ref_ptr<Io_device> const &dev)
 {
-  auto region = Region::ss(start, sz);
-
   // Check for overlapping regions!
   if (_iomap.count(region) != 0)
     throw L4::Runtime_error(L4_EINVAL, "IO map entry overlapping.");
 
   _iomap[region] = dev;
 
-  trace().printf("New io mappping: %p @ [0x%lx, 0x%zx]\n", dev.get(), start, sz);
+  trace().printf("New io mappping: %p @ [0x%lx, 0x%lx]\n", dev.get(),
+                 region.start, region.end);
 }
 
 L4virtio::Ptr<void>
@@ -101,7 +100,7 @@ void Guest::prepare_linux_run(Vcpu_ptr vcpu, l4_addr_t entry, Ram_ds *ram,
       zpage.add_ramdisk(rd_start, rd_end - rd_start);
     }
   else
-      Dbg().printf("No ramdisk found in device tree.");
+    Dbg().printf("No ramdisk found in device tree.\n");
 
   if (cmd_line)
     zpage.add_cmdline(cmd_line);
@@ -340,7 +339,7 @@ Guest::handle_exit_vmx(Vmm::Vcpu_ptr vcpu)
     case Exit::Exec_halt:
       trace().printf("HALT 0x%llx!\n", vms->vmx_read(L4VCPU_VMCS_GUEST_RIP));
       vms->vmx_write(L4VCPU_VMCS_GUEST_ACTIVITY_STATE, 1);
-      current_lapic(vcpu)->wait_for_irq();
+      lapic(vcpu)->wait_for_irq();
       vms->unhalt();
       return L4_EOK;
 
@@ -348,10 +347,10 @@ Guest::handle_exit_vmx(Vmm::Vcpu_ptr vcpu)
       return vms->handle_cr_access(regs);
 
     case Exit::Exec_rdmsr:
-      return vms->handle_exec_rmsr(regs, current_lapic(vcpu));
+      return vms->handle_exec_rmsr(regs, lapic(vcpu));
 
     case Exit::Exec_wrmsr:
-      return vms->handle_exec_wmsr(regs, current_lapic(vcpu));
+      return vms->handle_exec_wmsr(regs, lapic(vcpu));
 
     case Exit::Virtualized_eoi:
       Dbg().printf("INFO: EOI virtualized for vector 0x%llx\n",
@@ -394,17 +393,24 @@ Guest::handle_exit_vmx(Vmm::Vcpu_ptr vcpu)
 void
 Guest::run(cxx::Ref_ptr<Cpu_dev_array> const &cpus)
 {
-  cpus->cpu(0)->powerup_cpu();
-  cpus->cpu(0)->startup();
-  Vcpu_ptr vcpu0 = cpus->vcpu(0);
-  vcpu0->user_task = _task.cap();
+  unsigned const max_cpuid = cpus->max_cpuid();
+  for (unsigned id = 0; id <= max_cpuid; ++id)
+    {
+      auto cpu = cpus->cpu(id);
+      cpu->powerup_cpu();
+      cpu->startup();
 
-  // TODO loop over CPU array and create each lAPIC
-  register_timer_device(_apics->lapic_ref(0));
-  _apics->lapic(0)->attach_cpu_thread(cpus->cpu(0)->thread_cap());
-  vcpu0.register_pt_walker(&_ptw);
+      Vcpu_ptr vcpu = cpu->vcpu();
+      vcpu->user_task = _task.cap();
+      vcpu.register_pt_walker(&_ptw);
 
-  Dbg(Dbg::Guest, Dbg::Info).printf("Starting VMM @ 0x%lx\n", vcpu0->r.ip);
+      unsigned vcpu_id = vcpu.get_vcpu_id();
+      _apics->register_core(vcpu_id);
+      register_timer_device(_apics->get(vcpu_id));
+      _apics->get(vcpu_id)->attach_cpu_thread(cpu->thread_cap());
+    }
+
+  Dbg(Dbg::Guest, Dbg::Info).printf("Starting VMM @ 0x%lx\n", cpus->vcpu(0)->r.ip);
 
   // TODO If SVM is implemented, we need to branch here for the Vm_state_t
   // to use the correct handle_exit_* function.
@@ -459,7 +465,7 @@ Guest::run_vmx(cxx::Ref_ptr<Cpu_dev> const &cpu_dev)
       if (vm->interrupts_enabled())
         {
           vm->disable_interrupt_window();
-          int irq = current_lapic(vcpu)->next_pending_irq();
+          int irq = lapic(vcpu)->next_pending_irq();
           if (irq >= 0)
             {
               if (0)
@@ -479,4 +485,3 @@ Guest::run_vmx(cxx::Ref_ptr<Cpu_dev> const &cpu_dev)
 }
 
 } // namespace
-
