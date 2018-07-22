@@ -22,6 +22,8 @@ REQUIRES_LIBS += $(STATIC_PLUGINS)
 
 CPPFLAGS += -fvisibility=hidden
 
+CXXFLAGS_lua_glue.swg.cc += -Wno-misleading-indentation
+
 include $(L4DIR)/mk/prog.mk
 
 # regenerate shipped files

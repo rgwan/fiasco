@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Kernkonzept GmbH.
+ * Copyright (C) 2018 Kernkonzept GmbH.
  * Author(s): Philipp Eppelt <philipp.eppelt@kernkonzept.com>
  *
  * This file is distributed under the terms of the GNU General Public
@@ -21,6 +21,7 @@
 #include "vm_state.h"
 #include "pt_walker.h"
 #include "ram_ds.h"
+#include "msi_distributor.h"
 
 using L4Re::Rm;
 
@@ -51,12 +52,11 @@ class Virt_lapic : public Vdev::Timer, public Ic
    void tick() override;
 
    // APIC soft Irq to force VCPU to handle IRQs
-   void irq_clear() const { _lapic_irq->receive(); };
    void irq_trigger(l4_uint32_t irq);
 
    // vCPU expected interface
    int next_pending_irq();
-   void wait_for_irq();
+   bool is_irq_pending();
 
    // X2APIC MSR interface
    bool read_msr(unsigned msr, l4_uint64_t *value);
@@ -102,6 +102,7 @@ class Virt_lapic : public Vdev::Timer, public Ic
    enum XAPIC_consts : unsigned
    {
      Xapic_mode_local_apic_id_shift = 24,
+     Extended_apic_enable_bit = 1UL << 10,
      Lapic_version = 0x60010, /// 10 = integrated APIC, 6 = max LVT entries - 1
    };
 }; // class Virt_lapic
@@ -114,7 +115,7 @@ class Lapic_array : public Vmm::Mmio_device_t<Lapic_array>, public Vdev::Device
   enum
   {
     // XXX sync with Max_cpus
-    Max_cores = 4,
+    Max_cores = 1,
     X2apic_msr_base = 0x800,
     Lapic_mem_addr = 0xfee00000,
     Lapic_mem_size = 0x1000,
@@ -144,10 +145,6 @@ public:
     _lapics[core_no] = Vdev::make_device<Virt_lapic>(core_no, Lapic_mem_addr);
   }
 
-  // Device interface
-  void init_device(Vdev::Device_lookup *, Vdev::Dt_node const &)
-  {}
-
   // Mmio device if
   l4_umword_t read(unsigned reg, char, unsigned cpu_id)
   {
@@ -169,14 +166,10 @@ public:
 /**
  * IO-APIC representation for IRQ/MSI routing. WIP!
  */
-class Io_apic : public Ic
+class Io_apic : public Ic, public Msi_distributor
 {
 public:
   Io_apic(cxx::Ref_ptr<Lapic_array> apics) : _apics(apics) {}
-
-  // Device interface
-  void init_device(Vdev::Device_lookup *, Vdev::Dt_node const &)
-  {}
 
   // IC interface
   void set(unsigned irq) override
@@ -203,6 +196,13 @@ public:
 
   unsigned dt_get_interrupt(Vdev::Dt_node const &, int) override
   { return 1; }
+
+  // Msi_distributor interface
+  void send(Vdev::Msi_msg message) const override
+  {
+    // TODO implement MSI-X parsing such that malconfigured MSIs are dropped.
+    _apics->get(0)->set(message.data & 0xff);
+  }
 
 private:
   cxx::Ref_ptr<Lapic_array> _apics;
