@@ -161,19 +161,16 @@ Virt_lapic::next_pending_irq()
   return -1;
 }
 
-void
-Virt_lapic::wait_for_irq()
+bool
+Virt_lapic::is_irq_pending()
 {
-    {
-      std::lock_guard<std::mutex> lock(_int_mutex);
+  std::lock_guard<std::mutex> lock(_int_mutex);
 
-      for (int i = 0; i < 256; ++i)
-        if (_irq_queued[i] > 0)
-          return;
+  for (int i = 0; i < 256; ++i)
+    if (_irq_queued[i] > 0)
+      return true;
 
-    }
-
-  irq_clear();
+  return false;
 }
 
 bool
@@ -188,8 +185,7 @@ Virt_lapic::read_msr(unsigned msr, l4_uint64_t *value)
         (_lapic_memory_address & 0xffff00000) | (1UL << 11) | (1UL << 8);
 
       if (_x2apic_enabled)
-        // 1UL << 10 = EXTD - Enable x2APIC mode
-        *value |= 1UL << 10;
+        *value |= Extended_apic_enable_bit;
       break;
     case 0x6e0: *value = _tsc_deadline; break;
     case 0x802:
@@ -253,8 +249,7 @@ Virt_lapic::write_msr(unsigned msr, l4_uint64_t value)
   switch(msr)
     {
     case 0x1b: // APIC base
-      // 1UL << 10 = EXTD - Enable x2APIC mode
-      _x2apic_enabled = value & (1UL << 10);
+      _x2apic_enabled = value & Extended_apic_enable_bit;
       if (_x2apic_enabled)
         Dbg().printf("------ x2APIC enabled\n");
       break;
@@ -273,12 +268,12 @@ Virt_lapic::write_msr(unsigned msr, l4_uint64_t value)
     case 0x808: _regs.tpr = value; break;
     case 0x80f: _regs.svr = value; break;
     case 0x80b: // x2APIC EOI
-                if(value != 0)
-                  {
-                    Dbg().printf("WARNING: write to EOI not zero, 0x%llx\n", value);
-                    return false;
-                  }
-                break;
+      if (value != 0)
+        {
+          Dbg().printf("WARNING: write to EOI not zero, 0x%llx\n", value);
+          return false;
+        }
+      break;
     case 0x828: _regs.esr = 0; break;
     case 0x82f: _regs.cmci = value; break;
     case 0x830: _regs.icr = value; break;
@@ -316,7 +311,7 @@ namespace {
 struct G : Vdev::Factory
 {
   cxx::Ref_ptr<Vdev::Device> create(Vdev::Device_lookup *devs,
-                                    Vdev::Dt_node const &node) override
+                                    Vdev::Dt_node const &) override
   {
     auto apics = devs->vmm()->apic_array();
     return Vdev::make_device<Gic::Io_apic>(apics);

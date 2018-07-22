@@ -17,14 +17,14 @@ all:: $(INSTALL_TARGET)
 
 libefi.a: FORCE
 	$(VERBOSE)$(MKDIR) lib
-	$(VERBOSE)$(MAKE) -C lib -f $(SRC_DIR)/../contrib/lib/Makefile \
+	$(VERBOSE) CFLAGS="-Wno-unused-but-set-variable -Wno-int-to-pointer-cast" $(MAKE) -C lib -f $(SRC_DIR)/../contrib/lib/Makefile \
 	                  ARCH3264=$(ARCH3264) ARCH=$(EFI_ARCH) \
 			  SRCDIR=$(SRC_DIR)/../contrib/lib ARCH=$(EFI_ARCH)
 	$(VERBOSE)$(LN) -sf lib/$@
 
 gnuefi/libgnuefi.a: FORCE
 	$(VERBOSE)$(MKDIR) gnuefi
-	$(VERBOSE)$(MAKE) -C gnuefi -f $(SRC_DIR)/../contrib/gnuefi/Makefile \
+	$(VERBOSE) CFLAGS="-Wno-unused-but-set-variable -Wno-int-to-pointer-cast" $(MAKE) -C gnuefi -f $(SRC_DIR)/../contrib/gnuefi/Makefile \
 	                  ARCH3264=$(ARCH3264) ARCH=$(EFI_ARCH) \
 	                  SRCDIR=$(SRC_DIR)/../contrib/gnuefi ARCH=$(EFI_ARCH)
 

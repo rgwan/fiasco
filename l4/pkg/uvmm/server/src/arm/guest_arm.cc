@@ -29,7 +29,7 @@ typedef void (*Entry)(Vmm::Vcpu_ptr vcpu);
 namespace Vmm {
 
 Guest::Guest()
-: _gic(Vdev::make_device<Gic::Dist>(16, 2)) // 16 * 32 spis, 2 cpus
+: _gic(Vdev::make_device<Gic::Dist>(16, Vmm::Cpu_dev::Max_cpus))
 {}
 
 Guest *
@@ -311,7 +311,7 @@ Guest::run(cxx::Ref_ptr<Cpu_dev_array> cpus)
   if (!_timer)
     L4Re::chksys(-ENODEV, "No timer available, aborting");
 
- _cpus = cpus;
+  _cpus = cpus;
   for (auto cpu: *cpus.get())
     {
       if (!cpu)
@@ -345,9 +345,9 @@ Guest::handle_entry(Vcpu_ptr vcpu)
 Cpu_dev *
 Guest::lookup_cpu(l4_uint32_t hwid) const
 {
-  for (unsigned i = 0; i < Cpu_dev_array::Max_cpus; ++i)
-    if (_cpus->vcpu_exists(i) && _cpus->cpu(i)->matches(hwid))
-      return _cpus->cpu(i).get();
+  for (auto const &cpu : *_cpus.get())
+    if (cpu && cpu->matches(hwid))
+      return cpu.get();
 
   return nullptr;
 }
@@ -527,6 +527,19 @@ Guest::handle_psci_call(Vcpu_ptr vcpu)
   return true;
 }
 
+void
+Guest::handle_smc_call(Vcpu_ptr vcpu)
+{
+  if (_smc_handler)
+    _smc_handler->smc(vcpu);
+  else
+    Err().printf("No handler for SMC call: a0=%lx a1=%lx ip=%lx\n",
+                 vcpu->r.r[0], vcpu->r.r[1], vcpu->r.ip);
+
+  vcpu->r.ip += 4;
+}
+
+
 static void dispatch_vm_call(Vcpu_ptr vcpu)
 {
   if (guest->handle_psci_call(vcpu))
@@ -538,10 +551,7 @@ static void dispatch_vm_call(Vcpu_ptr vcpu)
 
 static void dispatch_smc(Vcpu_ptr vcpu)
 {
-  Err().printf("Unknown SMC call: a0=%lx a1=%lx ip=%lx\n",
-               vcpu->r.r[0], vcpu->r.r[1], vcpu->r.ip);
-
-  vcpu->r.ip += 4;
+  guest->handle_smc_call(vcpu);
 }
 
 static void

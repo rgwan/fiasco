@@ -322,7 +322,7 @@ l4shmc_add_signal(l4shmc_area_t *shmarea,
   snprintf(b, sizeof(b) - 1, "sig-%s", signal_name);
   b[sizeof(b) - 1] = 0;
 
-  r = l4re_ns_register_obj_srv(tmp, b, signal->_sigcap, 0);
+  r = l4re_ns_register_obj_srv(tmp, b, signal->_sigcap | L4_CAP_FPAGE_RW, 0);
   if (r)
     goto out_unmap_irq;
 

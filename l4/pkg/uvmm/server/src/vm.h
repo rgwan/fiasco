@@ -42,14 +42,14 @@ public:
    * \see Device_lookup::get_or_create_ic_dev(Vdev::Dt_node const &node,
    *                                          bool fatal)
    */
-  virtual cxx::Ref_ptr<Gic::Ic> get_or_create_ic_dev(Vdev::Dt_node const &node,
-                                                     bool fatal) override;
+  cxx::Ref_ptr<Gic::Ic> get_or_create_ic_dev(Vdev::Dt_node const &node,
+                                             bool fatal) override;
   /**
    * \see Device_lookup::get_or_create_ic(Vdev::Dt_node const &node,
    *                                      cxx::Ref_ptr<Gic::Ic> *ic_ptr)
    */
-  virtual Ic_error get_or_create_ic(Vdev::Dt_node const &node,
-                                    cxx::Ref_ptr<Gic::Ic> *ic_ptr) override;
+  Ic_error get_or_create_ic(Vdev::Dt_node const &node,
+                            cxx::Ref_ptr<Gic::Ic> *ic_ptr) override;
 
   void create_default_devices(l4_addr_t rambase)
   {
@@ -67,15 +67,13 @@ public:
                                                         _ram->size()));
 
     auto vbus_cap = e->get_cap<L4vbus::Vbus>("vbus");
-    if (!vbus_cap)
-      vbus_cap = e->get_cap<L4vbus::Vbus>("vm_bus");
     _vbus = cxx::make_ref_obj<Vmm::Virt_bus>(vbus_cap);
 
     _cpus = Vdev::make_device<Vmm::Cpu_dev_array>();
   }
 
   void add_device(Vdev::Dt_node const &node,
-                  cxx::Ref_ptr<Vdev::Device> dev)
+                  cxx::Ref_ptr<Vdev::Device> dev) override
   { _devices.add(node, dev); }
 
 private:

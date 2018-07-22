@@ -182,8 +182,8 @@ Canvas<PT>::_draw_alpha_texture(Texture<Pixel_traits> const *texture,
                                 int h, int w, int src_w)
 {
   typedef typename Pixel_traits::Pixel Pixel;
-  bool xa = !Pixel_traits::A::Size && texture->extra_alpha();
-  if (!xa && !Pixel_traits::A::Size)
+  bool xa = Pixel_traits::A::Size == 0 && texture->extra_alpha();
+  if (!xa && Pixel_traits::A::Size == 0)
     return false;
 
   unsigned char const *ab;
