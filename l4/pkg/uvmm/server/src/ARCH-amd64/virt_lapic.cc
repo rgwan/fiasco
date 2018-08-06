@@ -32,10 +32,17 @@ Virt_lapic::Virt_lapic(unsigned id, l4_addr_t baseaddr)
   _lapic_version(Lapic_version),
   _x2apic_enabled(false)
 {
-  Dbg().printf("Virt_lapic ctor\n");
+  trace().printf("Virt_lapic ctor; ID 0x%x\n", id);
 
   chksys(L4Re::Env::env()->factory()->create(_lapic_irq.get()),
          "Create APIC IRQ.");
+
+  // Set reset values of the LAPIC registers
+  memset(&_regs, 0, sizeof(_regs));
+  _regs.dfr = -1U;
+  _regs.cmci = _regs.timer = _regs.therm = _regs.perf = 0x00010000;
+  _regs.lint[0] = _regs.lint[1] = _regs.err = 0x00010000;
+  _regs.svr = 0x000000ff;
 }
 
 void
@@ -174,18 +181,16 @@ Virt_lapic::is_irq_pending()
 }
 
 bool
-Virt_lapic::read_msr(unsigned msr, l4_uint64_t *value)
+Virt_lapic::read_msr(unsigned msr, l4_uint64_t *value) const
 {
   switch (msr)
     {
     case 0x1b: // APIC base
-      // 1UL << 11 = EN xAPIC global en/disable
-      // 1UL << 8 = processor is BSP
       *value =
-        (_lapic_memory_address & 0xffff00000) | (1UL << 11) | (1UL << 8);
+        _lapic_memory_address | Apic_base_enabled | Apic_base_bsp_processor;
 
       if (_x2apic_enabled)
-        *value |= Extended_apic_enable_bit;
+        *value |= Apic_base_x2_enabled;
       break;
     case 0x6e0: *value = _tsc_deadline; break;
     case 0x802:
@@ -197,6 +202,11 @@ Virt_lapic::read_msr(unsigned msr, l4_uint64_t *value)
     case 0x808: *value = _regs.tpr; break;
     case 0x80a: *value = _regs.ppr; break;
     case 0x80d: *value = _regs.ldr; break;
+    case 0x80e:
+      // not existent in x2apic mode
+      if (!_x2apic_enabled)
+        *value = _regs.dfr;
+      break;
     case 0x80f: *value = _regs.svr; break;
     case 0x810:
     case 0x811:
@@ -249,9 +259,15 @@ Virt_lapic::write_msr(unsigned msr, l4_uint64_t value)
   switch(msr)
     {
     case 0x1b: // APIC base
-      _x2apic_enabled = value & Extended_apic_enable_bit;
+      _x2apic_enabled = value & Apic_base_x2_enabled;
       if (_x2apic_enabled)
-        Dbg().printf("------ x2APIC enabled\n");
+        {
+          Dbg().printf("------ x2APIC enabled\n");
+          // from Intel SDM (October 2017)
+          // Logical x2APIC ID = [(x2APIC ID[19:4] « 16) | (1 « x2APIC ID[3:0])]
+          _regs.ldr =
+            (_lapic_x2_id & 0xffff0) << 16 | 1U << (_lapic_x2_id & 0xf);
+        }
       break;
     case 0x6e0:
       {
@@ -266,7 +282,16 @@ Virt_lapic::write_msr(unsigned msr, l4_uint64_t value)
       }
     case 0x803: _lapic_version = value; break;
     case 0x808: _regs.tpr = value; break;
-    case 0x80f: _regs.svr = value; break;
+    case 0x80d:
+      // not writable in x2apic mode
+      if (!_x2apic_enabled)
+        _regs.ldr = value;
+      break;
+    case 0x80e:
+      // not existent in x2apic mode; writes by system software only in
+      // disabled APIC state; which currently isn't supported. => write ignored
+      break;
+    case 0x80f: _regs.svr = value; break; // TODO react on APIC SW en/disable
     case 0x80b: // x2APIC EOI
       if (value != 0)
         {

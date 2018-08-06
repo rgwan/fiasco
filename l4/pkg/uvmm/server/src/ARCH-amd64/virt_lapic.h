@@ -29,82 +29,133 @@ namespace Gic {
 
 class Virt_lapic : public Vdev::Timer, public Ic
 {
- public:
-   Virt_lapic(unsigned id, l4_addr_t baseaddr);
+  struct LAPIC_registers
+  {
+    l4_uint32_t tpr;
+    l4_uint32_t ppr;
+    l4_uint32_t ldr; ///< logical destination register
+    l4_uint32_t dfr; ///< destination format register not existent in x2APIC
+    l4_uint32_t svr; ///< Spurious vector register
+    l4_uint32_t isr[8];
+    l4_uint32_t tmr[8];
+    l4_uint32_t irr[8];
+    l4_uint32_t esr;
+    l4_uint32_t cmci;
+    l4_uint64_t icr;
+    l4_uint32_t timer;
+    l4_uint32_t therm;
+    l4_uint32_t perf;
+    l4_uint32_t lint[2];
+    l4_uint32_t err;
+    l4_uint32_t tmr_init;
+    l4_uint32_t tmr_cur;
+    l4_uint32_t tmr_div;
+  };
 
-   void attach_cpu_thread(L4::Cap<L4::Thread> vthread)
-   {
-     L4Re::chksys(_lapic_irq->bind_thread(vthread, 0),
-                  "Attaching local APIC IRQ to vCPU thread");
-   }
+  enum XAPIC_consts : unsigned
+  {
+    Xapic_mode_local_apic_id_shift = 24,
+    Xapic_mode_logical_apic_id_shift = 24,
+    Xapic_dfr_model_mask = 0xfU << 28,
 
-   // IC interface
-   void set(unsigned irq) override;
-   void clear(unsigned irq) override;
+    Apic_base_bsp_processor = 1UL << 8,
+    Apic_base_x2_enabled = 1UL << 10,
+    Apic_base_enabled = 1U << 11,
 
-   void bind_irq_source(unsigned, cxx::Ref_ptr<Irq_source> const &) override;
-   cxx::Ref_ptr<Irq_source> get_irq_source(unsigned ) const override;
+    Lapic_version = 0x60010, /// 10 = integrated APIC, 6 = max LVT entries - 1
 
-   int dt_get_num_interrupts(Vdev::Dt_node const &) override;
-   unsigned dt_get_interrupt(Vdev::Dt_node const &, int ) override;
+    X2apic_ldr_logical_apic_id_mask = 0xffff,
+    X2apic_ldr_logical_cluster_id_size = 0xffff,
+    X2apic_ldr_logical_cluster_id_shift = 16,
+  };
 
-   // Timer interface
-   void tick() override;
+public:
+  Virt_lapic(unsigned id, l4_addr_t baseaddr);
 
-   // APIC soft Irq to force VCPU to handle IRQs
-   void irq_trigger(l4_uint32_t irq);
+  void attach_cpu_thread(L4::Cap<L4::Thread> vthread)
+  {
+    L4Re::chksys(_lapic_irq->bind_thread(vthread, 0),
+                 "Attaching local APIC IRQ to vCPU thread");
+  }
 
-   // vCPU expected interface
-   int next_pending_irq();
-   bool is_irq_pending();
+  // IC interface
+  void set(unsigned irq) override;
+  void clear(unsigned irq) override;
 
-   // X2APIC MSR interface
-   bool read_msr(unsigned msr, l4_uint64_t *value);
-   bool write_msr(unsigned msr, l4_uint64_t value);
+  void bind_irq_source(unsigned, cxx::Ref_ptr<Irq_source> const &) override;
+  cxx::Ref_ptr<Irq_source> get_irq_source(unsigned) const override;
 
-   l4_addr_t apic_base() const { return _lapic_memory_address; }
+  int dt_get_num_interrupts(Vdev::Dt_node const &) override;
+  unsigned dt_get_interrupt(Vdev::Dt_node const &, int) override;
 
- private:
-   struct LAPIC_registers
-   {
-     l4_uint32_t tpr;
-     l4_uint32_t ppr;
-     l4_uint32_t ldr;
-     l4_uint32_t svr;
-     l4_uint32_t isr[8];
-     l4_uint32_t tmr[8];
-     l4_uint32_t irr[8];
-     l4_uint32_t esr;
-     l4_uint32_t cmci;
-     l4_uint64_t icr;
-     l4_uint32_t timer;
-     l4_uint32_t therm;
-     l4_uint32_t perf;
-     l4_uint32_t lint[2];
-     l4_uint32_t err;
-     l4_uint32_t tmr_init;
-     l4_uint32_t tmr_cur;
-     l4_uint32_t tmr_div;
-    };
+  // Timer interface
+  void tick() override;
 
-   L4Re::Util::Unique_cap<L4::Irq> _lapic_irq; /// IRQ to notify VCPU
-   l4_addr_t _lapic_memory_address;
-   unsigned _lapic_x2_id;
-   unsigned _lapic_version;
-   std::mutex _int_mutex;
-   std::mutex _tmr_mutex;
-   LAPIC_registers _regs;
-   l4_uint64_t _tsc_deadline;
-   bool _x2apic_enabled;
-   unsigned _irq_queued[256];
-   cxx::Ref_ptr<Irq_source> _sources[256];
+  // APIC soft Irq to force VCPU to handle IRQs
+  void irq_trigger(l4_uint32_t irq);
 
-   enum XAPIC_consts : unsigned
-   {
-     Xapic_mode_local_apic_id_shift = 24,
-     Extended_apic_enable_bit = 1UL << 10,
-     Lapic_version = 0x60010, /// 10 = integrated APIC, 6 = max LVT entries - 1
-   };
+  // vCPU expected interface
+  int next_pending_irq();
+  bool is_irq_pending();
+
+  // X2APIC MSR interface
+  bool read_msr(unsigned msr, l4_uint64_t *value) const;
+  bool write_msr(unsigned msr, l4_uint64_t value);
+
+  l4_addr_t apic_base() const { return _lapic_memory_address; }
+
+  l4_uint32_t logical_apic_id() const
+  {
+    return _x2apic_enabled ? _regs.ldr
+                           : _regs.ldr >> Xapic_mode_logical_apic_id_shift;
+  }
+
+  /**
+   * Match a destination ID bitmask against this LAPIC's unique logical ID.
+   */
+  bool match_ldr(l4_uint32_t did) const
+  {
+    auto logical_id = logical_apic_id();
+
+    if (_x2apic_enabled)
+      {
+        // x2APIC supports only cluster mode
+        // ldr format: 31:16 cluster id, 15:0 logical APIC ID
+        // XXX SMP: assumption cluster id = 0 as no SMP support.
+        logical_id &= X2apic_ldr_logical_apic_id_mask;
+      }
+    else
+      {
+        // Intel SDM: October 2017: cluster modes: flat and hierarchical cluster
+        // flat cluster only in p6 and pentium processors;
+        // hierarchical cluster need a cluster manager device.
+        // => flat address mode is the only supported one.
+        // flat address mode: dfr[31:28] = 0b1111;
+        if ((_regs.dfr & Xapic_dfr_model_mask) != Xapic_dfr_model_mask)
+          {
+            trace().printf(
+              "Cluster addressing mode not supported; MSI dropped\n");
+            return false;
+          }
+      }
+
+    return logical_id & did;
+  }
+
+private:
+  static Dbg trace() { return Dbg(Dbg::Irq, Dbg::Trace, "LAPIC"); }
+
+  L4Re::Util::Unique_cap<L4::Irq> _lapic_irq; /// IRQ to notify VCPU
+  l4_addr_t const _lapic_memory_address;
+  l4_uint32_t _lapic_x2_id;
+  unsigned _lapic_version;
+  std::mutex _int_mutex;
+  std::mutex _tmr_mutex;
+  LAPIC_registers _regs;
+  l4_uint64_t _tsc_deadline;
+  bool _x2apic_enabled;
+  unsigned _irq_queued[256];
+  cxx::Ref_ptr<Irq_source> _sources[256];
 }; // class Virt_lapic
 
 
@@ -120,18 +171,30 @@ class Lapic_array : public Vmm::Mmio_device_t<Lapic_array>, public Vdev::Device
     Lapic_mem_addr = 0xfee00000,
     Lapic_mem_size = 0x1000,
   };
-  cxx::Ref_ptr<Virt_lapic> _lapics[Max_cores];
-
-  unsigned reg2msr(unsigned reg) { return (reg >> 4) | X2apic_msr_base; }
+  static_assert(!(Lapic_mem_addr & 0xfff), "LAPIC memory is 4k-aligned.");
 
 public:
+  explicit Lapic_array(unsigned max_phys_addr_bit)
+  : _max_phys_addr_mask((1UL << max_phys_addr_bit) - 1)
+  {
+    assert((Lapic_mem_addr & _max_phys_addr_mask) == Lapic_mem_addr);
+  }
+
+  Virt_lapic *get_by_dest_id(l4_uint32_t did) const
+  {
+    for (auto &lapic : _lapics)
+      if (lapic && lapic->match_ldr(did))
+        return lapic.get();
+
+    return nullptr;
+  }
+
   Region mmio_region() const
   { return Region::ss(Lapic_mem_addr, Lapic_mem_size); }
 
   cxx::Ref_ptr<Virt_lapic> get(unsigned core_no)
   {
-    assert(core_no < Max_cores);
-    return _lapics[core_no];
+    return (core_no < Max_cores) ? _lapics[core_no] : nullptr;
   }
 
   void register_core(unsigned core_no)
@@ -160,6 +223,13 @@ public:
     if (cpu_id < Max_cores)
       _lapics[cpu_id]->write_msr(reg2msr(reg), value);
   }
+
+private:
+  static unsigned reg2msr(unsigned reg)
+  { return (reg >> 4) | X2apic_msr_base; }
+
+  l4_uint64_t _max_phys_addr_mask;
+  cxx::Ref_ptr<Virt_lapic> _lapics[Max_cores];
 }; // class Lapic_array
 
 
@@ -168,6 +238,41 @@ public:
  */
 class Io_apic : public Ic, public Msi_distributor
 {
+  enum
+  {
+    Msi_address_interrupt_prefix = 0xfee,
+  };
+
+  struct Interrupt_request_compat
+  {
+    // Interrupt request compatibility format
+    l4_uint64_t raw;
+    CXX_BITFIELD_MEMBER_RO(32, 63, reserved0_2, raw);
+    CXX_BITFIELD_MEMBER_RO(20, 31, fixed, raw);
+    CXX_BITFIELD_MEMBER_RO(12, 19, dest_id, raw);
+    CXX_BITFIELD_MEMBER_RO(4, 11, reserved0_1, raw);
+    CXX_BITFIELD_MEMBER_RO(3, 3, redirect_hint, raw);
+    CXX_BITFIELD_MEMBER_RO(2, 2, dest_mode, raw);
+    CXX_BITFIELD_MEMBER_RO(0, 1, reserved_0, raw);
+
+    explicit Interrupt_request_compat(l4_uint64_t addr) : raw(addr) {};
+    bool is_phys_addr_mode() { return redirect_hint() && !dest_mode(); }
+    bool is_logical_addr_mode() { return redirect_hint() && dest_mode(); }
+    bool is_direct_addr_mode() { return !redirect_hint(); }
+  };
+
+  struct Msi_data_register_format
+  {
+    // Intel SDM Vol. 3A 10-35, October 2017
+    l4_uint32_t raw;
+    CXX_BITFIELD_MEMBER_RO(15, 15, trigger_mode, raw);
+    CXX_BITFIELD_MEMBER_RO(14, 14, trigger_level, raw);
+    CXX_BITFIELD_MEMBER_RO( 8, 10, delivery_mode, raw);
+    CXX_BITFIELD_MEMBER_RO( 0,  7, vector, raw);
+
+    explicit Msi_data_register_format(l4_uint32_t data) : raw(data) {};
+  };
+
 public:
   Io_apic(cxx::Ref_ptr<Lapic_array> apics) : _apics(apics) {}
 
@@ -200,11 +305,47 @@ public:
   // Msi_distributor interface
   void send(Vdev::Msi_msg message) const override
   {
-    // TODO implement MSI-X parsing such that malconfigured MSIs are dropped.
-    _apics->get(0)->set(message.data & 0xff);
+    Interrupt_request_compat addr(message.addr);
+    if (addr.fixed() != Msi_address_interrupt_prefix)
+      {
+        trace().printf("Interrupt request prefix invalid; MSI dropped.\n");
+        return;
+      }
+
+    Virt_lapic *lapic = nullptr;
+
+    if (addr.is_direct_addr_mode())
+      {
+        // Direct addressing mode: destination ID references a local APIC ID.
+        unsigned did = addr.dest_id();
+        lapic = _apics->get(did).get();
+      }
+    else if (addr.is_phys_addr_mode())
+      {
+        // physical addressing mode:
+        //   dest_id() references a local APIC ID
+        lapic = _apics->get(addr.dest_id()).get();
+      }
+    else
+      {
+        // logical addressing mode:
+        //   dest_id() is a bitmask of logical APIC ID targets
+        lapic = _apics->get_by_dest_id(addr.dest_id());
+      }
+
+    if (lapic)
+      {
+        Msi_data_register_format data(message.data);
+        lapic->set(data.vector());
+      }
+    else
+      trace().printf("No valid LAPIC found; MSI dropped. MSI address 0x%llx\n",
+                     message.addr);
   }
 
 private:
+  static Dbg trace() { return Dbg(Dbg::Irq, Dbg::Trace, "IO-APIC"); }
+
   cxx::Ref_ptr<Lapic_array> _apics;
 }; // class Io_apic
 

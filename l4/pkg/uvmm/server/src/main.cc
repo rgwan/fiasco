@@ -16,9 +16,7 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cerrno>
 #include <cstring>
-#include <iostream>
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -119,22 +117,6 @@ phys_dev_cb(Vdev::Dt_node const &node)
 
   node.setprop_string("status", "disabled");
   return false;
-}
-
-
-static cxx::Ref_ptr<Monitor_console>
-create_monitor()
-{
-  const char * const capname = "mon";
-  auto mon_con_cap = L4Re::Env::env()->get_cap<L4::Vcon>(capname);
-  if (!mon_con_cap)
-    return nullptr;
-
-  auto moncon = cxx::make_ref_obj<Monitor_console>(capname, mon_con_cap,
-                                                   &vm_instance);
-  moncon->register_obj(vm_instance.vmm()->registry());
-
-  return moncon;
 }
 
 static Vdev::Device_tree
@@ -375,7 +357,7 @@ static int run(int argc, char *argv[])
   warn.printf("Hello out there.\n");
 
   vm_instance.create_default_devices(rambase);
-  auto mon = create_monitor();
+  auto mon = Monitor_console::create(&vm_instance);
 
   auto *vmm = vm_instance.vmm();
   auto *ram = vm_instance.ram().get();
